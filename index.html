@@ -1,0 +1,386 @@
+import React, { useState, useEffect } from 'react';
+import { initializeApp } from 'firebase/app';
+import { 
+  getAuth, 
+  signInAnonymously, 
+  signInWithCustomToken,
+  onAuthStateChanged
+} from 'firebase/auth';
+import { 
+  getFirestore, 
+  collection, 
+  addDoc, 
+  deleteDoc, 
+  doc, 
+  onSnapshot,
+  updateDoc,
+  setDoc
+} from 'firebase/firestore';
+import { 
+  Plus, 
+  Trash2, 
+  Search, 
+  X, 
+  Edit3, 
+  Settings, 
+  ArrowUpRight,
+  ShieldCheck,
+  Lock,
+  LogIn,
+  ChevronRight
+} from 'lucide-react';
+
+const firebaseConfig = JSON.parse(__firebase_config);
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'history-magazine-v1';
+
+export default function App() {
+  const [user, setUser] = useState(null);
+  const [isAuthReady, setIsAuthReady] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [showLoginModal, setShowLoginModal] = useState(false);
+  const [loginForm, setLoginForm] = useState({ username: '', password: '' });
+  
+  const [materials, setMaterials] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [isPostModalOpen, setIsPostModalOpen] = useState(false);
+  const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
+  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState('Tất cả');
+  const [newCategoryName, setNewCategoryName] = useState('');
+  
+  const [siteConfig, setSiteConfig] = useState({
+    brandName: 'SỬ VIỆT',
+    subBrand: 'DIGITAL ARCHIVE',
+    heroTitle: 'Di Sản Ngàn Năm',
+    heroDescription: 'Nơi lưu trữ và số hóa các tư liệu lịch sử quý giá của dân tộc Việt Nam.',
+    sectionTitle: 'KHO TƯ LIỆU',
+  });
+
+  const [formData, setFormData] = useState({
+    title: '',
+    category: '',
+    link: '',
+    image: '',
+    description: ''
+  });
+
+  useEffect(() => {
+    const initAuth = async () => {
+      try {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          await signInAnonymously(auth);
+        }
+      } catch (error) {
+        console.error("Auth error:", error);
+      }
+    };
+    initAuth();
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      if (currentUser) setIsAuthReady(true);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (!isAuthReady || !user) return;
+    const mRef = collection(db, 'artifacts', appId, 'public', 'data', 'materials');
+    const cRef = collection(db, 'artifacts', appId, 'public', 'data', 'categories');
+    const confRef = doc(db, 'artifacts', appId, 'public', 'data', 'config', 'site');
+    
+    const unsubConfig = onSnapshot(confRef, (d) => {
+      if (d.exists()) setSiteConfig(prev => ({ ...prev, ...d.data() }));
+    });
+    const unsubMaterials = onSnapshot(mRef, (s) => {
+      setMaterials(s.docs.map(d => ({ id: d.id, ...d.data() })));
+      setLoading(false);
+    });
+    const unsubCategories = onSnapshot(cRef, (s) => {
+      setCategories(s.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+    return () => { unsubConfig(); unsubMaterials(); unsubCategories(); };
+  }, [isAuthReady, user]);
+
+  const handleAdminLogin = (e) => {
+    e.preventDefault();
+    if (loginForm.username === 'ngocngan_12' && loginForm.password === '12132010') {
+      setIsAdmin(true);
+      setShowLoginModal(false);
+      setLoginForm({ username: '', password: '' });
+    } else {
+      alert("Sai thông tin quản trị!");
+    }
+  };
+
+  const filtered = materials.filter(m => {
+    const t = m.title?.toLowerCase().includes(searchTerm.toLowerCase());
+    const c = selectedCategory === 'Tất cả' || m.category === selectedCategory;
+    return t && c;
+  });
+
+  return (
+    <div className="min-h-screen bg-[#F8F7F4] text-[#2D2D2D] font-sans selection:bg-black selection:text-white">
+      {/* Navbar Tinh Gọn */}
+      <nav className="fixed top-0 w-full z-50 bg-[#F8F7F4]/80 backdrop-blur-md border-b border-black/5">
+        <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <span className="text-lg font-black tracking-tight font-serif italic">{siteConfig.brandName}</span>
+            <span className="hidden sm:block text-[10px] tracking-[0.2em] font-bold text-black/30 uppercase border-l border-black/10 pl-4">{siteConfig.subBrand}</span>
+          </div>
+          
+          <div className="flex items-center gap-4">
+            {isAdmin && (
+              <button onClick={() => setIsSettingsModalOpen(true)} className="p-2 hover:bg-black/5 rounded-full transition-colors text-black/60"><Settings size={18} /></button>
+            )}
+            {isAdmin ? (
+              <div className="flex items-center gap-3 bg-white border border-black/5 rounded-full pl-3 pr-1 py-1">
+                <span className="text-[10px] font-bold text-emerald-600 flex items-center gap-1"><ShieldCheck size={12}/> Admin</span>
+                <button onClick={() => setIsAdmin(false)} className="bg-black text-white text-[9px] px-3 py-1.5 rounded-full font-bold uppercase tracking-wider">Thoát</button>
+              </div>
+            ) : (
+              <button onClick={() => setShowLoginModal(true)} className="text-[11px] font-bold uppercase tracking-widest text-black/40 hover:text-black flex items-center gap-2"><Lock size={12} /> Quản trị</button>
+            )}
+          </div>
+        </div>
+      </nav>
+
+      {/* Hero Header Hiện Đại */}
+      <header className="pt-32 pb-16 px-6 max-w-7xl mx-auto">
+        <div className="flex flex-col md:flex-row md:items-end justify-between gap-8">
+          <div className="max-w-2xl">
+            <h1 className="text-5xl md:text-7xl font-serif font-bold tracking-tight leading-tight mb-4">
+              {siteConfig.heroTitle}
+            </h1>
+            <p className="text-lg text-black/50 font-light max-w-lg">{siteConfig.heroDescription}</p>
+          </div>
+          <div className="w-full md:w-72">
+            <div className="relative">
+              <input 
+                type="text" 
+                placeholder="Tìm tư liệu..."
+                className="w-full bg-white border border-black/5 rounded-xl py-3 px-4 pl-10 text-sm focus:ring-2 focus:ring-black/5 outline-none transition-all"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-black/20" size={16} />
+            </div>
+          </div>
+        </div>
+
+        {/* Categories Pills */}
+        <div className="mt-12 flex flex-wrap gap-2 pb-6 border-b border-black/5">
+          {['Tất cả', ...categories.map(c => c.name)].map((cat) => (
+            <button
+              key={cat}
+              onClick={() => setSelectedCategory(cat)}
+              className={`px-4 py-2 rounded-full text-[11px] font-bold uppercase tracking-wider transition-all ${
+                selectedCategory === cat ? 'bg-black text-white shadow-lg' : 'bg-white text-black/40 border border-black/5 hover:border-black/20'
+              }`}
+            >
+              {cat}
+            </button>
+          ))}
+        </div>
+      </header>
+
+      {/* Grid Tư Liệu Gọn Gàng */}
+      <main className="max-w-7xl mx-auto px-6 py-12">
+        <div className="flex justify-between items-center mb-10">
+          <h2 className="text-[11px] font-black uppercase tracking-[0.3em] text-black/30">{siteConfig.sectionTitle}</h2>
+          {isAdmin && (
+            <button 
+              onClick={() => { setEditingId(null); setFormData({title: '', category: categories[0]?.name || '', link: '', image: '', description: ''}); setIsPostModalOpen(true); }}
+              className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 rounded-full font-bold text-[10px] uppercase tracking-widest transition-all shadow-md"
+            >
+              <Plus size={14} /> Thêm mới
+            </button>
+          )}
+        </div>
+
+        {loading ? (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+            {[1,2,3].map(i => <div key={i} className="h-64 bg-black/5 rounded-2xl animate-pulse"></div>)}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+            {filtered.map((item) => (
+              <div key={item.id} className="group bg-white rounded-2xl border border-black/[0.03] overflow-hidden hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
+                <div className="relative aspect-[16/10] overflow-hidden bg-gray-100">
+                  {item.image ? (
+                    <img src={item.image} alt={item.title} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-black/10 font-serif italic uppercase tracking-widest text-xs">No Image</div>
+                  )}
+                  <div className="absolute top-4 left-4">
+                    <span className="bg-white/90 backdrop-blur-sm text-black px-3 py-1 rounded-lg text-[9px] font-bold uppercase tracking-widest shadow-sm">{item.category}</span>
+                  </div>
+                </div>
+                <div className="p-6">
+                  <h3 className="text-xl font-serif font-bold mb-3 leading-snug group-hover:text-emerald-800 transition-colors line-clamp-2">{item.title}</h3>
+                  <p className="text-black/40 text-sm font-light mb-6 line-clamp-2 leading-relaxed italic">"{item.description}"</p>
+                  <div className="flex items-center justify-between pt-4 border-t border-black/5">
+                    <a href={item.link} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-[10px] font-black uppercase tracking-widest hover:gap-2 transition-all">
+                      Xem tư liệu <ChevronRight size={12}/>
+                    </a>
+                    {isAdmin && (
+                      <div className="flex gap-1">
+                        <button onClick={() => { setEditingId(item.id); setFormData(item); setIsPostModalOpen(true); }} className="p-2 hover:bg-blue-50 text-blue-400 rounded-lg transition-colors"><Edit3 size={14}/></button>
+                        <button onClick={async () => confirm("Xóa vĩnh viễn?") && await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'materials', item.id))} className="p-2 hover:bg-red-50 text-red-300 rounded-lg transition-colors"><Trash2 size={14}/></button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </main>
+
+      {/* Footer Tinh Giản */}
+      <footer className="mt-20 py-16 border-t border-black/5">
+        <div className="max-w-7xl mx-auto px-6 text-center">
+          <div className="text-2xl font-serif font-bold italic mb-4">{siteConfig.brandName}</div>
+          <p className="text-[10px] font-bold uppercase tracking-[0.4em] text-black/20">© 2025 DIGITAL ARCHIVE — PRESERVING HISTORY</p>
+        </div>
+      </footer>
+
+      {/* Modals Login */}
+      {showLoginModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm">
+          <div className="bg-white w-full max-w-sm rounded-3xl p-10 relative shadow-2xl">
+            <button onClick={() => setShowLoginModal(false)} className="absolute top-6 right-6 text-black/20 hover:text-black transition-colors"><X size={20}/></button>
+            <div className="text-center mb-8">
+              <div className="w-14 h-14 bg-black text-white rounded-2xl flex items-center justify-center mx-auto mb-4 rotate-3 shadow-lg">
+                <LogIn size={24} />
+              </div>
+              <h2 className="text-2xl font-bold font-serif">Đăng nhập Quản trị</h2>
+            </div>
+            <form onSubmit={handleAdminLogin} className="space-y-4">
+              <input 
+                type="text" 
+                placeholder="Tên đăng nhập"
+                className="w-full bg-gray-50 border border-black/5 rounded-xl py-3 px-4 outline-none focus:border-black transition-colors"
+                value={loginForm.username}
+                onChange={(e) => setLoginForm({...loginForm, username: e.target.value})}
+                required
+              />
+              <input 
+                type="password" 
+                placeholder="Mật khẩu"
+                className="w-full bg-gray-50 border border-black/5 rounded-xl py-3 px-4 outline-none focus:border-black transition-colors"
+                value={loginForm.password}
+                onChange={(e) => setLoginForm({...loginForm, password: e.target.value})}
+                required
+              />
+              <button type="submit" className="w-full bg-black text-white py-4 rounded-xl font-bold uppercase tracking-widest text-[11px] shadow-lg hover:bg-emerald-700 transition-all">Đăng nhập</button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Admin Modals Logic (Settings & Edit) - Giữ nguyên tính năng cũ nhưng nâng cấp UI */}
+      {isAdmin && isSettingsModalOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/60 backdrop-blur-md">
+          <div className="bg-white w-full max-w-2xl rounded-3xl p-10 relative shadow-2xl overflow-y-auto max-h-[90vh]">
+            <button onClick={() => setIsSettingsModalOpen(false)} className="absolute top-8 right-8 text-black/20 hover:text-black"><X /></button>
+            <h2 className="text-3xl font-serif font-bold mb-8">Cấu hình Trang web</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="space-y-4">
+                <label className="text-[10px] font-bold uppercase text-black/40">Tên dự án</label>
+                <input className="w-full bg-gray-50 border border-black/5 rounded-xl py-3 px-4" value={siteConfig.brandName} onChange={e => setSiteConfig({...siteConfig, brandName: e.target.value})} />
+                <label className="text-[10px] font-bold uppercase text-black/40">Tiêu đề chính</label>
+                <input className="w-full bg-gray-50 border border-black/5 rounded-xl py-3 px-4" value={siteConfig.heroTitle} onChange={e => setSiteConfig({...siteConfig, heroTitle: e.target.value})} />
+              </div>
+              <div className="space-y-4">
+                <label className="text-[10px] font-bold uppercase text-black/40">Mô tả giới thiệu</label>
+                <textarea rows="4" className="w-full bg-gray-50 border border-black/5 rounded-xl py-3 px-4 resize-none" value={siteConfig.heroDescription} onChange={e => setSiteConfig({...siteConfig, heroDescription: e.target.value})} />
+              </div>
+            </div>
+            <div className="mt-10 flex gap-4">
+              <button onClick={async () => {
+                const confRef = doc(db, 'artifacts', appId, 'public', 'data', 'config', 'site');
+                await setDoc(confRef, siteConfig);
+                setIsSettingsModalOpen(false);
+              }} className="flex-grow bg-black text-white py-4 rounded-xl font-bold uppercase tracking-widest text-xs">Lưu thay đổi</button>
+              <button onClick={() => setIsCategoryModalOpen(true)} className="px-6 border border-black rounded-xl text-xs font-bold uppercase tracking-widest">Danh mục</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Post Modal */}
+      {isAdmin && isPostModalOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/60 backdrop-blur-md">
+          <div className="bg-white w-full max-w-xl rounded-3xl p-10 relative shadow-2xl overflow-y-auto max-h-[90vh]">
+            <button onClick={() => setIsPostModalOpen(false)} className="absolute top-8 right-8 text-black/20 hover:text-black"><X /></button>
+            <h2 className="text-3xl font-serif font-bold mb-8">{editingId ? 'Sửa tư liệu' : 'Thêm tư liệu'}</h2>
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              try {
+                const colRef = collection(db, 'artifacts', appId, 'public', 'data', 'materials');
+                if (editingId) { await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'materials', editingId), formData); } 
+                else { await addDoc(colRef, formData); }
+                setIsPostModalOpen(false);
+              } catch (err) { alert("Lỗi hệ thống."); }
+            }} className="space-y-6">
+              <input required placeholder="Tiêu đề tư liệu" className="w-full bg-gray-50 border border-black/5 rounded-xl py-4 px-5 text-lg outline-none focus:border-black font-serif" value={formData.title} onChange={e => setFormData({...formData, title: e.target.value})} />
+              <div className="grid grid-cols-2 gap-4">
+                <select className="bg-gray-50 border border-black/5 rounded-xl py-3 px-4 outline-none" value={formData.category} onChange={e => setFormData({...formData, category: e.target.value})}>
+                  <option value="">Chọn mục</option>
+                  {categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                </select>
+                <input placeholder="URL hình ảnh" className="bg-gray-50 border border-black/5 rounded-xl py-3 px-4 outline-none" value={formData.image} onChange={e => setFormData({...formData, image: e.target.value})} />
+              </div>
+              <input required placeholder="Đường dẫn (Link) tài liệu" className="w-full bg-gray-50 border border-black/5 rounded-xl py-3 px-4 outline-none" value={formData.link} onChange={e => setFormData({...formData, link: e.target.value})} />
+              <textarea rows="4" placeholder="Mô tả nội dung tóm tắt..." className="w-full bg-gray-50 border border-black/5 rounded-xl py-3 px-4 outline-none resize-none" value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})}></textarea>
+              <button className="w-full bg-black text-white py-4 rounded-xl font-bold uppercase tracking-widest text-xs hover:bg-emerald-700 transition-all shadow-lg">Xác nhận Lưu</button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Category Manager Modal */}
+      {isAdmin && isCategoryModalOpen && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-6 bg-black/80 backdrop-blur-xl">
+          <div className="bg-white w-full max-w-sm rounded-3xl p-10 relative shadow-2xl">
+            <button onClick={() => setIsCategoryModalOpen(false)} className="absolute top-6 right-6 text-black/20 hover:text-black"><X size={20}/></button>
+            <h2 className="text-xl font-serif font-bold mb-6">Quản lý Chuyên mục</h2>
+            <div className="flex gap-2 mb-6">
+              <input placeholder="Tên mục mới..." className="flex-grow bg-gray-50 border border-black/5 rounded-xl px-4 py-2 text-sm outline-none focus:border-black" value={newCategoryName} onChange={e => setNewCategoryName(e.target.value)} />
+              <button onClick={async () => {
+                if (!newCategoryName) return;
+                await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'categories'), { name: newCategoryName }); 
+                setNewCategoryName('');
+              }} className="bg-black text-white px-4 py-2 rounded-xl text-[10px] font-bold uppercase">Thêm</button>
+            </div>
+            <div className="space-y-2 max-h-60 overflow-y-auto pr-2">
+              {categories.map(c => (
+                <div key={c.id} className="flex justify-between items-center py-2 border-b border-black/5">
+                  <span className="text-xs font-bold text-black/60 uppercase tracking-widest">{c.name}</span>
+                  <button onClick={async () => confirm("Xóa mục này?") && await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'categories', c.id))} className="text-red-300 hover:text-red-500"><Trash2 size={14}/></button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Crimson+Pro:ital,wght@0,400;0,700;0,900;1,400&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
+        .font-serif { font-family: 'Crimson Pro', serif; }
+        body { font-family: 'Plus Jakarta Sans', sans-serif; }
+        ::-webkit-scrollbar { width: 5px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.1); border-radius: 10px; }
+      `}</style>
+    </div>
+  );
+}ø
